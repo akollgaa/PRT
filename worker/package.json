@@ -1,0 +1,25 @@
+{
+  "name": "worker",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "schedule:build": "node scripts/build-schedule.mjs",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
+    "test": "vitest",
+    "cf-typegen": "wrangler types"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.0.0",
+    "@types/node": "^26.4.0",
+    "typescript": "^5.5.2",
+    "vitest": "~4.1.0",
+    "wrangler": "^4.127.1"
+  },
+  "dependencies": {
+    "csv-parse": "^7.0.2",
+    "fflate": "^0.8.3",
+    "gtfs-realtime-bindings": "^2.2.0"
+  }
+}
