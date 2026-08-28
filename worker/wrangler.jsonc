@@ -12,7 +12,8 @@
 		"enabled": true
 	},
 	"vars": {
-    "PRT_TRIP_UPDATES_URL": "https://truetime.portauthority.org/gtfsrt-bus/trips"
+    "PRT_TRIP_UPDATES_URL": "https://truetime.portauthority.org/gtfsrt-bus/trips",
+    "PRT_VEHICLES_URL": "https://truetime.portauthority.org/gtfsrt-bus/vehicles"
   	},
 	"upload_source_maps": true
 	/**

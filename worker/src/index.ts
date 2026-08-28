@@ -1,7 +1,7 @@
 import GtfsRealtimeBindings from "gtfs-realtime-bindings"
 import schedule from "./data/schedule.json"
 
-interface Env { PRT_TRIP_UPDATES_URL: string }
+interface Env { PRT_TRIP_UPDATES_URL: string; PRT_VEHICLES_URL: string }
 type AnyRecord = Record<string, any>
 type ScheduleData = { trips: AnyRecord[]; calendar: AnyRecord[]; calendarDates: AnyRecord[] }
 const scheduleData = schedule as unknown as ScheduleData
@@ -68,9 +68,27 @@ function scheduledArrivals(nowSeconds: number, stopId: string) {
   })
 }
 
-function normalize(buffer: ArrayBuffer, nowSeconds = Math.floor(Date.now() / 1000), stopId = DEFAULT_STOP_ID) {
+function vehicleStatuses(buffer: ArrayBuffer | undefined, nowSeconds: number) {
+  const statuses = new Map<string, "moving" | "stopped">()
+  if (!buffer) return statuses
+  const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(buffer)) as AnyRecord
+  for (const entity of feed.entity ?? []) {
+    const vehicle = field(entity, "vehicle") as AnyRecord | undefined
+    const descriptor = field(vehicle, "vehicle") as AnyRecord | undefined
+    const vehicleId = field(descriptor, "id")
+    const position = field(vehicle, "position") as AnyRecord | undefined
+    const speed = numberValue(field(position, "speed"))
+    const timestamp = numberValue(field(vehicle, "timestamp"))
+    if (!vehicleId || speed === undefined || (timestamp !== undefined && nowSeconds - timestamp > 180)) continue
+    statuses.set(String(vehicleId), speed > 0 ? "moving" : "stopped")
+  }
+  return statuses
+}
+
+function normalize(buffer: ArrayBuffer, vehicleBuffer?: ArrayBuffer, nowSeconds = Math.floor(Date.now() / 1000), stopId = DEFAULT_STOP_ID) {
   const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(buffer)) as AnyRecord
   const arrivals: AnyRecord[] = scheduledArrivals(nowSeconds, stopId)
+  const statuses = vehicleStatuses(vehicleBuffer, nowSeconds)
   const realtimeByTrip = new Map<string, AnyRecord>()
   for (const entity of feed.entity ?? []) {
     const update = field(entity, "tripUpdate", "trip_update") as AnyRecord | undefined
@@ -88,7 +106,10 @@ function normalize(buffer: ArrayBuffer, nowSeconds = Math.floor(Date.now() / 100
       const event = field(stopUpdate, "arrival") ?? field(stopUpdate, "departure")
       const epochSeconds = numberValue(field(event, "time"))
       if (epochSeconds === undefined || epochSeconds < nowSeconds || epochSeconds > nowSeconds + WINDOW_SECONDS) continue
-      const item = { routeId: String(routeId), tripId: tripId ? String(tripId) : undefined, predictedTime: new Date(epochSeconds * 1000).toISOString(), scheduledTime: timeLabel(epochSeconds), realtime: true, predictedEpoch: epochSeconds }
+      const updateVehicle = field(update, "vehicle") as AnyRecord | undefined
+      const vehicleId = field(updateVehicle, "id")
+      const vehicleStatus = vehicleId ? statuses.get(String(vehicleId)) : undefined
+      const item = { routeId: String(routeId), tripId: tripId ? String(tripId) : undefined, predictedTime: new Date(epochSeconds * 1000).toISOString(), scheduledTime: timeLabel(epochSeconds), realtime: true, vehicleStatus: vehicleStatus ?? "unknown", predictedEpoch: epochSeconds }
       if (tripId) realtimeByTrip.set(String(tripId), item)
       else arrivals.push(item)
       break
@@ -112,11 +133,15 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { headers: corsHeaders })
     if (request.method !== "GET") return new Response("Method Not Allowed", { status: 405, headers: corsHeaders })
     try {
-      const upstream = await fetch(env.PRT_TRIP_UPDATES_URL, { headers: { Accept: "application/octet-stream" } })
-      if (!upstream.ok) return new Response(`PRT feed returned ${upstream.status}`, { status: 502, headers: corsHeaders })
       const requestedStop = new URL(request.url).searchParams.get("stop") ?? DEFAULT_STOP_ID
       if (!/^[A-Za-z0-9_-]+$/.test(requestedStop)) return new Response("Invalid stop", { status: 400, headers: corsHeaders })
-      const result = normalize(await upstream.arrayBuffer(), Math.floor(Date.now() / 1000), requestedStop)
+      const [upstream, vehicles] = await Promise.all([
+        fetch(env.PRT_TRIP_UPDATES_URL, { headers: { Accept: "application/octet-stream" } }),
+        fetch(env.PRT_VEHICLES_URL, { headers: { Accept: "application/octet-stream" } }),
+      ])
+      if (!upstream.ok) return new Response(`PRT feed returned ${upstream.status}`, { status: 502, headers: corsHeaders })
+      const nowSeconds = Math.floor(Date.now() / 1000)
+      const result = normalize(await upstream.arrayBuffer(), vehicles.ok ? await vehicles.arrayBuffer() : undefined, nowSeconds, requestedStop)
       return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } })
     } catch (error) {
       console.error(error)
