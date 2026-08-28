@@ -92,7 +92,7 @@ function App() {
 
   return <main className="board">
     <header className="board-header">
-          <div><p className="eyebrow">Made by Adam Kollgaard</p><h1>Bus Arrival Board</h1><form className="stop" onSubmit={submitStop}><label htmlFor="stop-id">Stop</label><input id="stop-id" value={stopInput} onChange={(event) => setStopInput(event.target.value)} inputMode="numeric" aria-label="Stop ID" /><button type="submit">Update</button><span>•</span> 61A · 61B · 61C · 61D</form></div>
+          <div><p className="eyebrow">Made by Adam Kollgaard</p><h1>Bus Board</h1><form className="stop" onSubmit={submitStop}><label htmlFor="stop-id">Stop</label><input id="stop-id" value={stopInput} onChange={(event) => setStopInput(event.target.value)} inputMode="numeric" aria-label="Stop ID" /><button type="submit">Update</button><span>•</span> 61A · 61B · 61C · 61D</form></div>
       <div className="header-side">{fact && <aside className="fact"><span>Fun fact</span><p>{fact}</p></aside>}<div className="clock"><strong>{clock.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</strong><span>{clock.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</span></div></div>
     </header>
     {error && <div className="status status-error">Live feed unavailable — showing the last successful update.</div>}
