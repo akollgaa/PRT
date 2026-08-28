@@ -10,6 +10,7 @@ const DEFAULT_STOP_ID = '7097'
 const REFRESH_MS = 30_000
 const FACT_ROTATION_MS = 12 * 60 * 60 * 1000
 const FEED_URL = import.meta.env.VITE_ARRIVALS_URL as string | undefined
+type Theme = 'light' | 'dark'
 
 const demoArrivals: Arrival[] = [
   { routeId: '61A', headsign: 'Braddock-Swissvale', scheduledTime: '10:08 AM', predictedTime: '10:10 AM', realtime: true },
@@ -36,6 +37,10 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [updatedAt, setUpdatedAt] = useState(new Date())
   const [clock, setClock] = useState(new Date())
+  const [theme, setTheme] = useState<Theme>(() => {
+    const saved = localStorage.getItem('prt-theme')
+    return saved === 'dark' || saved === 'light' ? saved : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+  })
   const [facts, setFacts] = useState<string[]>([])
   const [fact, setFact] = useState('')
 
@@ -88,12 +93,17 @@ function App() {
     return () => window.clearInterval(timer)
   }, [facts])
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('prt-theme', theme)
+  }, [theme])
+
   const arrivals = useMemo(() => (feed?.arrivals ?? []).filter((arrival) => ROUTES.includes(arrival.routeId)).slice(0, 20), [feed])
 
   return <main className="board">
     <header className="board-header">
           <div><p className="eyebrow">Made by Adam Kollgaard</p><h1>Bus Board</h1><form className="stop" onSubmit={submitStop}><label htmlFor="stop-id">Stop</label><input id="stop-id" value={stopInput} onChange={(event) => setStopInput(event.target.value)} inputMode="numeric" aria-label="Stop ID" /><button type="submit">Update</button><span>•</span> 61A · 61B · 61C · 61D</form></div>
-      <div className="header-side">{fact && <aside className="fact"><span>Fun fact</span><p>{fact}</p></aside>}<div className="clock"><strong>{clock.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</strong><span>{clock.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</span></div></div>
+      <div className="header-side">{fact && <aside className="fact"><span>Fun fact</span><p>{fact}</p></aside>}<div className="clock"><strong>{clock.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</strong><span>{clock.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</span></div><button className="theme-toggle" type="button" onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}>{theme === 'dark' ? '☀ Light' : '◐ Dark'}</button></div>
     </header>
     {error && <div className="status status-error">Live feed unavailable — showing the last successful update.</div>}
     {!FEED_URL && <div className="status status-demo">Demo mode — set <code>VITE_ARRIVALS_URL</code> to connect the Cloudflare Worker.</div>}
