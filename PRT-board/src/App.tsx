@@ -8,6 +8,7 @@ type FeedResponse = { arrivals: Arrival[]; source?: string }
 const ROUTES = ['61A', '61B', '61C', '61D']
 const DEFAULT_STOP_ID = '7097'
 const REFRESH_MS = 30_000
+const FACT_ROTATION_MS = 12 * 60 * 60 * 1000
 const FEED_URL = import.meta.env.VITE_ARRIVALS_URL as string | undefined
 
 const demoArrivals: Arrival[] = [
@@ -35,6 +36,8 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [updatedAt, setUpdatedAt] = useState(new Date())
   const [clock, setClock] = useState(new Date())
+  const [facts, setFacts] = useState<string[]>([])
+  const [fact, setFact] = useState('')
 
   const refresh = useCallback(async () => {
     if (!FEED_URL) return
@@ -66,12 +69,31 @@ function App() {
     return () => { window.clearInterval(refreshTimer); window.clearInterval(clockTimer) }
   }, [refresh])
 
+  useEffect(() => {
+    fetch('/facts.txt')
+      .then((response) => response.text())
+      .then((text) => setFacts(text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)))
+      .catch(() => setFacts([]))
+  }, [])
+
+  useEffect(() => {
+    const chooseFact = () => {
+      if (!facts.length) return
+      const windowNumber = Math.floor(Date.now() / FACT_ROTATION_MS)
+      const pseudoRandom = Math.abs(Math.sin(windowNumber * 12.9898) * 43758.5453)
+      setFact(facts[Math.floor((pseudoRandom % 1) * facts.length)])
+    }
+    chooseFact()
+    const timer = window.setInterval(chooseFact, 60_000)
+    return () => window.clearInterval(timer)
+  }, [facts])
+
   const arrivals = useMemo(() => (feed?.arrivals ?? []).filter((arrival) => ROUTES.includes(arrival.routeId)).slice(0, 20), [feed])
 
   return <main className="board">
     <header className="board-header">
-          <div><p className="eyebrow">Pittsburgh Regional Transit</p><h1>Next buses</h1><form className="stop" onSubmit={submitStop}><label htmlFor="stop-id">Stop</label><input id="stop-id" value={stopInput} onChange={(event) => setStopInput(event.target.value)} inputMode="numeric" aria-label="Stop ID" /><button type="submit">Update</button><span>•</span> 61A · 61B · 61C · 61D</form></div>
-      <div className="clock"><strong>{clock.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</strong><span>{clock.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</span></div>
+          <div><p className="eyebrow">Pittsburgh Regional Transit</p><h1>Bus Arrival Board</h1><form className="stop" onSubmit={submitStop}><label htmlFor="stop-id">Stop</label><input id="stop-id" value={stopInput} onChange={(event) => setStopInput(event.target.value)} inputMode="numeric" aria-label="Stop ID" /><button type="submit">Update</button><span>•</span> 61A · 61B · 61C · 61D</form></div>
+      <div className="header-side">{fact && <aside className="fact"><span>Fun fact</span><p>{fact}</p></aside>}<div className="clock"><strong>{clock.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</strong><span>{clock.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })}</span></div></div>
     </header>
     {error && <div className="status status-error">Live feed unavailable — showing the last successful update.</div>}
     {!FEED_URL && <div className="status status-demo">Demo mode — set <code>VITE_ARRIVALS_URL</code> to connect the Cloudflare Worker.</div>}
