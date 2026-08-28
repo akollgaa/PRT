@@ -15,9 +15,13 @@ h1 { margin:0; font:700 clamp(38px,5vw,70px)/.95 'Space Grotesk',sans-serif; let
 @media (max-width:760px) { .board-header { align-items:start; flex-direction:column; } .header-side { width:100%; align-items:end; justify-content:space-between; gap:16px; } .fact { max-width:62%; text-align:left; } .clock { text-align:right; } .table-heading { display:none; } .arrival { grid-template-columns:62px 1fr auto; gap:14px; min-height:92px; padding-right:0; } .route { min-height:62px; font-size:19px; } .times { grid-column:2; grid-row:2; flex-direction:row; align-items:baseline; } .times strong { font-size:17px; } .times span { font-size:12px; } .arrival-right { grid-column:3; grid-row:1 / span 2; } .countdown { font-size:32px; } .movement-status { font-size:11px; } .board-footer { flex-direction:column; gap:5px; } }
 
 :root[data-theme="dark"] {
-  :root { --ink:#eef6f3; --muted:#a8bbb7; --line:#344745; --cream:#101918; --teal:#56d2c4; }
-  body { background:var(--cream); }
-  .stop input { color:var(--ink); background:#1b2927; border-color:var(--line); }
-  .prediction-status.realtime { color:#56d2c4; } .prediction-status.scheduled { color:#f4bd63; } .movement-status.moving { color:#56d2c4; } .movement-status.stopped { color:#f4bd63; }
-  .status-demo { background:#403716; color:#ffe7a2; } .status-error { background:#482522; color:#ffb9ae; }
+  --ink:#eef6f3; --muted:#a8bbb7; --line:#344745; --cream:#101918; --teal:#56d2c4;
 }
+:root[data-theme="dark"] body { background:var(--cream); }
+:root[data-theme="dark"] #root, :root[data-theme="dark"] .board { background:var(--cream); }
+:root[data-theme="dark"] .stop input { color:var(--ink); background:#1b2927; border-color:var(--line); }
+:root[data-theme="dark"] .prediction-status.realtime { color:#56d2c4; }
+:root[data-theme="dark"] .prediction-status.scheduled, :root[data-theme="dark"] .movement-status.stopped { color:#f4bd63; }
+:root[data-theme="dark"] .movement-status.moving { color:#56d2c4; }
+:root[data-theme="dark"] .status-demo { background:#403716; color:#ffe7a2; }
+:root[data-theme="dark"] .status-error { background:#482522; color:#ffb9ae; }
