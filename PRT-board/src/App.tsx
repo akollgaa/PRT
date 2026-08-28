@@ -70,7 +70,7 @@ function App() {
   }, [refresh])
 
   useEffect(() => {
-    fetch('/facts.txt')
+    fetch(`${import.meta.env.BASE_URL}facts.txt`)
       .then((response) => response.text())
       .then((text) => setFacts(text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)))
       .catch(() => setFacts([]))
