@@ -1,7 +1,6 @@
-import GtfsRealtimeBindings from "gtfs-realtime-bindings"
 import schedule from "./data/schedule.json"
 
-interface Env { PRT_TRIP_UPDATES_URL: string; PRT_VEHICLES_URL: string }
+interface Env { PRT_API_BASE_URL?: string; PRT_API_KEY?: string; PRT_RTPI_DATA_FEED?: string }
 type AnyRecord = Record<string, any>
 type ScheduleData = { trips: AnyRecord[]; calendar: AnyRecord[]; calendarDates: AnyRecord[] }
 const scheduleData = schedule as unknown as ScheduleData
@@ -24,6 +23,11 @@ function numberValue(value: unknown): number | undefined {
     if (typeof candidate.low === "number") return candidate.low + (candidate.high ?? 0) * 2 ** 32
   }
   return undefined
+}
+function epochSecondsValue(value: unknown) {
+  const numeric = numberValue(value)
+  if (numeric === undefined) return undefined
+  return numeric > 1_000_000_000_000 ? numeric / 1000 : numeric
 }
 function timeLabel(epochSeconds: number) {
   return new Date(epochSeconds * 1000).toLocaleTimeString("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit" })
@@ -68,52 +72,51 @@ function scheduledArrivals(nowSeconds: number, stopId: string) {
   })
 }
 
-function vehicleStatuses(buffer: ArrayBuffer | undefined, nowSeconds: number) {
-  const statuses = new Map<string, "moving" | "stopped">()
-  if (!buffer) return statuses
-  const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(buffer)) as AnyRecord
-  for (const entity of feed.entity ?? []) {
-    const vehicle = field(entity, "vehicle") as AnyRecord | undefined
-    const descriptor = field(vehicle, "vehicle") as AnyRecord | undefined
-    const vehicleId = field(descriptor, "id")
-    const position = field(vehicle, "position") as AnyRecord | undefined
-    const speed = numberValue(field(position, "speed"))
-    const timestamp = numberValue(field(vehicle, "timestamp"))
-    if (!vehicleId || speed === undefined || (timestamp !== undefined && nowSeconds - timestamp > 180)) continue
-    statuses.set(String(vehicleId), speed > 0 ? "moving" : "stopped")
-  }
-  return statuses
+function arrayField(value: unknown, ...names: string[]) {
+  const result = field(value as AnyRecord | undefined, ...names)
+  if (Array.isArray(result)) return result
+  return result ? [result] : []
 }
 
-function normalize(buffer: ArrayBuffer, vehicleBuffer?: ArrayBuffer, nowSeconds = Math.floor(Date.now() / 1000), stopId = DEFAULT_STOP_ID) {
-  const feed = GtfsRealtimeBindings.transit_realtime.FeedMessage.decode(new Uint8Array(buffer)) as AnyRecord
-  const arrivals: AnyRecord[] = scheduledArrivals(nowSeconds, stopId)
-  const statuses = vehicleStatuses(vehicleBuffer, nowSeconds)
-  const realtimeByTrip = new Map<string, AnyRecord>()
-  for (const entity of feed.entity ?? []) {
-    const update = field(entity, "tripUpdate", "trip_update") as AnyRecord | undefined
-    if (!update) continue
-    const trip = field(update, "trip") as AnyRecord | undefined
-    const routeId = field(trip, "routeId", "route_id")
-    const tripId = field(trip, "tripId", "trip_id")
-    const relationship = String(field(trip, "scheduleRelationship", "schedule_relationship") ?? "").toUpperCase()
-    if (!trip || !ROUTES.has(String(routeId)) || relationship === "CANCELED") continue
-    const updates = field(update, "stopTimeUpdate", "stop_time_update") ?? []
-    for (const stopUpdate of updates) {
-      if (String(field(stopUpdate, "stopId", "stop_id") ?? "") !== stopId) continue
-      const stopRelationship = String(field(stopUpdate, "scheduleRelationship", "schedule_relationship") ?? "").toUpperCase()
-      if (stopRelationship === "SKIPPED") continue
-      const event = field(stopUpdate, "arrival") ?? field(stopUpdate, "departure")
-      const epochSeconds = numberValue(field(event, "time"))
-      if (epochSeconds === undefined || epochSeconds < nowSeconds || epochSeconds > nowSeconds + WINDOW_SECONDS) continue
-      const updateVehicle = field(update, "vehicle") as AnyRecord | undefined
-      const vehicleId = field(updateVehicle, "id")
-      const vehicleStatus = vehicleId ? statuses.get(String(vehicleId)) : undefined
-      const item = { routeId: String(routeId), tripId: tripId ? String(tripId) : undefined, predictedTime: new Date(epochSeconds * 1000).toISOString(), scheduledTime: timeLabel(epochSeconds), realtime: true, vehicleStatus: vehicleStatus ?? "unknown", predictedEpoch: epochSeconds }
-      if (tripId) realtimeByTrip.set(String(tripId), item)
-      else arrivals.push(item)
-      break
+async function parseApiResponse(response: Response) {
+  const body = (await response.text()).replace(/^\uFEFF/, "")
+  try {
+    return JSON.parse(body) as AnyRecord
+  } catch (error) {
+    // Some BusTime deployments emit non-standard escapes such as \\' in
+    // otherwise valid JSON. Preserve valid escapes and quote only invalid ones.
+    const repaired = body.replace(/\\(?!["\\/bfnrtu])/g, "\\\\")
+    try {
+      return JSON.parse(repaired) as AnyRecord
+    } catch {
+      throw new Error(`Invalid BusTime API response (${response.headers.get("content-type") ?? "unknown content type"}): ${error instanceof Error ? error.message : "unknown parse error"}; body=${body.slice(0, 160)}`)
     }
+  }
+}
+
+function normalize(apiResponse: AnyRecord, vehicleResponse?: AnyRecord, nowSeconds = Math.floor(Date.now() / 1000), stopId = DEFAULT_STOP_ID) {
+  const arrivals: AnyRecord[] = scheduledArrivals(nowSeconds, stopId)
+  const statuses = new Map<string, "moving" | "stopped" | "unknown">()
+  for (const vehicle of arrayField(vehicleResponse?.["bustime-response"], "vehicle", "vehicles")) {
+    const id = field(vehicle, "vid")
+    const speed = numberValue(field(vehicle, "spd"))
+    if (id) statuses.set(String(id), speed === undefined ? "unknown" : speed > 0 ? "moving" : "stopped")
+  }
+  const realtimeByTrip = new Map<string, AnyRecord>()
+  const root = apiResponse?.["bustime-response"] ?? {}
+  for (const prediction of arrayField(root, "prd", "predictions")) {
+    const routeId = String(field(prediction, "rt", "rtdd") ?? "")
+    if (!ROUTES.has(routeId) || String(field(prediction, "stpid") ?? "") !== stopId) continue
+    if (String(field(prediction, "typ") ?? "A").toUpperCase() === "D") continue
+    const predictedTimestamp = epochSecondsValue(field(prediction, "prdtm"))
+    const countdownMinutes = numberValue(field(prediction, "prdctdn"))
+    const predictedEpoch = predictedTimestamp ?? (countdownMinutes === undefined ? undefined : nowSeconds + countdownMinutes * 60)
+    if (predictedEpoch === undefined || predictedEpoch < nowSeconds || predictedEpoch > nowSeconds + WINDOW_SECONDS) continue
+    const vehicleId = field(prediction, "vid")
+    const tripId = field(prediction, "origtatripno", "tatripid")
+    const item = { routeId, tripId: tripId ? String(tripId) : undefined, headsign: field(prediction, "des"), predictedTime: new Date(predictedEpoch * 1000).toISOString(), scheduledTime: timeLabel(predictedEpoch), realtime: true, vehicleStatus: vehicleId ? (statuses.get(String(vehicleId)) ?? "unknown") : "unknown", predictedEpoch }
+    if (tripId) realtimeByTrip.set(String(tripId), item)
+    else arrivals.push(item)
   }
   for (let index = arrivals.length - 1; index >= 0; index--) {
     const scheduled = arrivals[index]
@@ -125,7 +128,7 @@ function normalize(buffer: ArrayBuffer, vehicleBuffer?: ArrayBuffer, nowSeconds 
   arrivals.push(...realtimeByTrip.values())
   arrivals.sort((a, b) => (a.predictedEpoch ?? a.scheduledEpoch) - (b.predictedEpoch ?? b.scheduledEpoch))
   arrivals.forEach((arrival) => { delete arrival.predictedEpoch; delete arrival.scheduledEpoch })
-  return { arrivals, source: "PRT GTFS-Realtime", fetchedAt: new Date().toISOString() }
+  return { arrivals, source: "PRT BusTime API", fetchedAt: new Date().toISOString() }
 }
 
 export default {
@@ -135,17 +138,43 @@ export default {
     try {
       const requestedStop = new URL(request.url).searchParams.get("stop") ?? DEFAULT_STOP_ID
       if (!/^[A-Za-z0-9_-]+$/.test(requestedStop)) return new Response("Invalid stop", { status: 400, headers: corsHeaders })
-      const [upstream, vehicles] = await Promise.all([
-        fetch(env.PRT_TRIP_UPDATES_URL, { headers: { Accept: "application/octet-stream" } }),
-        fetch(env.PRT_VEHICLES_URL, { headers: { Accept: "application/octet-stream" } }),
-      ])
-      if (!upstream.ok) return new Response(`PRT feed returned ${upstream.status}`, { status: 502, headers: corsHeaders })
+      if (!env.PRT_API_KEY) return new Response("PRT API key is not configured", { status: 503, headers: corsHeaders })
+      const baseUrl = env.PRT_API_BASE_URL ?? "http://realtime.portauthority.org/bustime/api/v3"
+      const rtpiDataFeed = env.PRT_RTPI_DATA_FEED ?? "bustime"
+      const predictionUrl = new URL(`${baseUrl.replace(/\/$/, "")}/getpredictions`)
+      predictionUrl.searchParams.set("key", env.PRT_API_KEY)
+      predictionUrl.searchParams.set("stpid", requestedStop)
+      predictionUrl.searchParams.set("rt", [...ROUTES].join(","))
+      predictionUrl.searchParams.set("format", "json")
+      predictionUrl.searchParams.set("unixTime", "true")
+      predictionUrl.searchParams.set("tmres", "s")
+      predictionUrl.searchParams.set("rtpidatafeed", rtpiDataFeed)
+      const vehicleUrl = new URL(`${baseUrl.replace(/\/$/, "")}/getvehicles`)
+      vehicleUrl.searchParams.set("key", env.PRT_API_KEY)
+      vehicleUrl.searchParams.set("rt", [...ROUTES].join(","))
+      vehicleUrl.searchParams.set("format", "json")
+      vehicleUrl.searchParams.set("tmres", "s")
+      vehicleUrl.searchParams.set("rtpidatafeed", rtpiDataFeed)
+      const [upstream, vehicles] = await Promise.all([fetch(predictionUrl), fetch(vehicleUrl)])
+      if (!upstream.ok) {
+        const body = (await upstream.text()).replace(/key=[^&\s]+/gi, "key=[redacted]").slice(0, 240)
+        console.error("PRT prediction request failed", upstream.status, upstream.headers.get("content-type"), body)
+        return new Response(`PRT API returned ${upstream.status}: ${body}`, { status: 502, headers: corsHeaders })
+      }
+      const apiResponse = await parseApiResponse(upstream)
+      const apiError = arrayField(apiResponse?.["bustime-response"], "error").length > 0
+      if (apiError) {
+        const message = arrayField(apiResponse?.["bustime-response"], "error").map((entry) => field(entry, "msg") ?? "Unknown API error").join("; ")
+        console.error("PRT API error", message)
+        return new Response(`PRT API error: ${message}`, { status: 502, headers: corsHeaders })
+      }
       const nowSeconds = Math.floor(Date.now() / 1000)
-      const result = normalize(await upstream.arrayBuffer(), vehicles.ok ? await vehicles.arrayBuffer() : undefined, nowSeconds, requestedStop)
+      const vehicleResponse = vehicles.ok ? await parseApiResponse(vehicles) : undefined
+      const result = normalize(apiResponse, vehicleResponse, nowSeconds, requestedStop)
       return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } })
     } catch (error) {
       console.error(error)
-      return new Response("Unable to decode PRT feed", { status: 502, headers: corsHeaders })
+      return new Response(`Unable to load PRT API: ${error instanceof Error ? error.message : "unknown error"}`, { status: 502, headers: corsHeaders })
     }
   },
 }

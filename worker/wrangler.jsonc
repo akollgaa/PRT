@@ -12,9 +12,9 @@
 		"enabled": true
 	},
 	"vars": {
-    "PRT_TRIP_UPDATES_URL": "https://truetime.portauthority.org/gtfsrt-bus/trips",
-    "PRT_VEHICLES_URL": "https://truetime.portauthority.org/gtfsrt-bus/vehicles"
-  	},
+    "PRT_API_BASE_URL": "http://realtime.portauthority.org/bustime/api/v3",
+    "PRT_RTPI_DATA_FEED": "Port Authority Bus"
+	  },
 	"upload_source_maps": true
 	/**
 	 * Smart Placement
