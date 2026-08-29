@@ -155,21 +155,35 @@ export default {
       vehicleUrl.searchParams.set("format", "json")
       vehicleUrl.searchParams.set("tmres", "s")
       vehicleUrl.searchParams.set("rtpidatafeed", rtpiDataFeed)
-      const [upstream, vehicles] = await Promise.all([fetch(predictionUrl), fetch(vehicleUrl)])
+      const [upstream, vehicles] = await Promise.all([
+        fetch(predictionUrl, { cache: "no-store" }),
+        fetch(vehicleUrl, { cache: "no-store" }),
+      ])
       if (!upstream.ok) {
         const body = (await upstream.text()).replace(/key=[^&\s]+/gi, "key=[redacted]").slice(0, 240)
         console.error("PRT prediction request failed", upstream.status, upstream.headers.get("content-type"), body)
         return new Response(`PRT API returned ${upstream.status}: ${body}`, { status: 502, headers: corsHeaders })
       }
       const apiResponse = await parseApiResponse(upstream)
-      const apiError = arrayField(apiResponse?.["bustime-response"], "error").length > 0
+      const apiErrors = arrayField(apiResponse?.["bustime-response"], "error")
+      const apiErrorMessage = apiErrors.map((entry) => String(field(entry, "msg") ?? "")).join("; ")
+      const noPredictions = /no (predictions?|data|arrivals?)/i.test(apiErrorMessage)
+      const apiError = apiErrors.length > 0 && !noPredictions
       if (apiError) {
-        const message = arrayField(apiResponse?.["bustime-response"], "error").map((entry) => field(entry, "msg") ?? "Unknown API error").join("; ")
-        console.error("PRT API error", message)
-        return new Response(`PRT API error: ${message}`, { status: 502, headers: corsHeaders })
+        console.error("PRT API error", apiErrorMessage)
+        return new Response(`PRT API error: ${apiErrorMessage || "Unknown API error"}`, { status: 502, headers: corsHeaders })
       }
       const nowSeconds = Math.floor(Date.now() / 1000)
-      const vehicleResponse = vehicles.ok ? await parseApiResponse(vehicles) : undefined
+      let vehicleResponse: AnyRecord | undefined
+      if (vehicles.ok) {
+        try {
+          vehicleResponse = await parseApiResponse(vehicles)
+        } catch (error) {
+          // Vehicle data is supplementary; a malformed/unavailable vehicle
+          // response must not hide valid arrival predictions.
+          console.error("Unable to parse PRT vehicle response", error)
+        }
+      }
       const result = normalize(apiResponse, vehicleResponse, nowSeconds, requestedStop)
       return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } })
     } catch (error) {
