@@ -98,7 +98,16 @@ function App() {
     localStorage.setItem('prt-theme', theme)
   }, [theme])
 
-  const arrivals = useMemo(() => (feed?.arrivals ?? []).filter((arrival) => ROUTES.includes(arrival.routeId)).slice(0, 20), [feed])
+  const arrivals = useMemo(() => {
+    const now = clock.getTime()
+    return (feed?.arrivals ?? [])
+      .filter((arrival) => ROUTES.includes(arrival.routeId))
+      .filter((arrival) => {
+        const timestamp = arrival.predictedTime ?? arrival.scheduledTimestamp
+        return !timestamp || new Date(timestamp).getTime() >= now
+      })
+      .slice(0, 20)
+  }, [clock, feed])
 
   return <main className="board">
     <header className="board-header">
