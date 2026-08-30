@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import './App.css'
 
-type Arrival = { routeId: string; headsign?: string; predictedTime?: string; scheduledTime: string; scheduledTimestamp?: string; realtime?: boolean; tripId?: string; vehicleStatus?: 'moving' | 'stopped' | 'unknown' }
+type Arrival = { routeId: string; predictedTime?: string; scheduledTime: string; scheduledTimestamp?: string; realtime?: boolean; tripId?: string; vehicleStatus?: 'moving' | 'stopped' | 'unknown' }
 type FeedResponse = { arrivals: Arrival[]; source?: string }
 
 const ROUTES = ['61A', '61B', '61C', '61D']
@@ -13,9 +13,9 @@ const FEED_URL = import.meta.env.VITE_ARRIVALS_URL as string | undefined
 type Theme = 'light' | 'dark'
 
 const demoArrivals: Arrival[] = [
-  { routeId: '61A', headsign: 'Braddock-Swissvale', scheduledTime: '10:08 AM', predictedTime: '10:10 AM', realtime: true },
-  { routeId: '61C', headsign: 'Braddock-Swissvale', scheduledTime: '10:17 AM', predictedTime: '10:18 AM', realtime: true },
-  { routeId: '61B', headsign: 'East Pittsburgh', scheduledTime: '10:26 AM' },
+  { routeId: '61A', scheduledTime: '10:08 AM', predictedTime: '10:10 AM', realtime: true },
+  { routeId: '61C', scheduledTime: '10:17 AM', predictedTime: '10:18 AM', realtime: true },
+  { routeId: '61B', scheduledTime: '10:26 AM' },
 ]
 
 function arrivalTime(time: string) {
@@ -117,7 +117,7 @@ function App() {
         <div className="arrival-right"><div className="countdown">{arrival.predictedTime || arrival.scheduledTimestamp ? countdown(arrival.predictedTime ?? arrival.scheduledTimestamp!) : '—'}</div>{arrival.realtime && arrival.vehicleStatus && <div className={`movement-status ${arrival.vehicleStatus}`}><span />{arrival.vehicleStatus}</div>}</div>
       </article>)}
     </section>
-    <footer className="board-footer"><span>Updated {updatedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</span><span>Predictions refresh every 30 seconds</span><span>{feed?.source ?? 'Live GTFS-Realtime'}</span></footer>
+    <footer className="board-footer"><span>Updated {updatedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' })}</span><span>Predictions refresh every 30 seconds</span><span>{feed?.source ?? 'Live BusTime API'}</span></footer>
   </main>
 }
 

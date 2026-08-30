@@ -14,13 +14,10 @@ function field(object: AnyRecord | undefined, ...names: string[]) {
   return undefined
 }
 function numberValue(value: unknown): number | undefined {
-  if (typeof value === "number") return value
-  if (typeof value === "bigint") return Number(value)
-  if (typeof value === "string" && value.trim()) return Number(value)
-  if (value && typeof value === "object") {
-    const candidate = value as AnyRecord
-    if (typeof candidate.toNumber === "function") return candidate.toNumber()
-    if (typeof candidate.low === "number") return candidate.low + (candidate.high ?? 0) * 2 ** 32
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
   }
   return undefined
 }
@@ -68,7 +65,7 @@ function scheduledArrivals(nowSeconds: number, stopId: string) {
     if (!active.has(trip.serviceId) || trip.stopId !== stopId) return []
     const seconds = serviceDateEpoch(now, trip.arrivalTime ?? trip.departureTime)
     if (seconds < nowSeconds || seconds > nowSeconds + WINDOW_SECONDS) return []
-    return [{ routeId: trip.routeId, tripId: trip.tripId, headsign: trip.headsign || undefined, scheduledTime: timeLabel(seconds), scheduledTimestamp: new Date(seconds * 1000).toISOString(), scheduledEpoch: seconds, realtime: false }]
+    return [{ routeId: trip.routeId, tripId: trip.tripId, scheduledTime: timeLabel(seconds), scheduledTimestamp: new Date(seconds * 1000).toISOString(), scheduledEpoch: seconds, realtime: false }]
   })
 }
 
@@ -114,7 +111,7 @@ function normalize(apiResponse: AnyRecord, vehicleResponse?: AnyRecord, nowSecon
     if (predictedEpoch === undefined || predictedEpoch < nowSeconds || predictedEpoch > nowSeconds + WINDOW_SECONDS) continue
     const vehicleId = field(prediction, "vid")
     const tripId = field(prediction, "origtatripno", "tatripid")
-    const item = { routeId, tripId: tripId ? String(tripId) : undefined, headsign: field(prediction, "des"), predictedTime: new Date(predictedEpoch * 1000).toISOString(), scheduledTime: timeLabel(predictedEpoch), realtime: true, vehicleStatus: vehicleId ? (statuses.get(String(vehicleId)) ?? "unknown") : "unknown", predictedEpoch }
+    const item = { routeId, tripId: tripId ? String(tripId) : undefined, predictedTime: new Date(predictedEpoch * 1000).toISOString(), scheduledTime: timeLabel(predictedEpoch), realtime: true, vehicleStatus: vehicleId ? (statuses.get(String(vehicleId)) ?? "unknown") : "unknown", predictedEpoch }
     if (tripId) realtimeByTrip.set(String(tripId), item)
     else arrivals.push(item)
   }
@@ -129,6 +126,10 @@ function normalize(apiResponse: AnyRecord, vehicleResponse?: AnyRecord, nowSecon
   arrivals.sort((a, b) => (a.predictedEpoch ?? a.scheduledEpoch) - (b.predictedEpoch ?? b.scheduledEpoch))
   arrivals.forEach((arrival) => { delete arrival.predictedEpoch; delete arrival.scheduledEpoch })
   return { arrivals, source: "PRT BusTime API", fetchedAt: new Date().toISOString() }
+}
+
+function staticFallback(stopId: string, warning: string) {
+  return { ...normalize({}, undefined, Math.floor(Date.now() / 1000), stopId), source: "PRT BusTime API unavailable; static schedule", warning }
 }
 
 export default {
@@ -162,7 +163,7 @@ export default {
       if (!upstream.ok) {
         const body = (await upstream.text()).replace(/key=[^&\s]+/gi, "key=[redacted]").slice(0, 240)
         console.error("PRT prediction request failed", upstream.status, upstream.headers.get("content-type"), body)
-        return new Response(`PRT API returned ${upstream.status}: ${body}`, { status: 502, headers: corsHeaders })
+        return new Response(JSON.stringify(staticFallback(requestedStop, `Upstream status ${upstream.status}`)), { headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } })
       }
       const apiResponse = await parseApiResponse(upstream)
       const apiErrors = arrayField(apiResponse?.["bustime-response"], "error")
@@ -171,7 +172,7 @@ export default {
       const apiError = apiErrors.length > 0 && !noPredictions
       if (apiError) {
         console.error("PRT API error", apiErrorMessage)
-        return new Response(`PRT API error: ${apiErrorMessage || "Unknown API error"}`, { status: 502, headers: corsHeaders })
+        return new Response(JSON.stringify(staticFallback(requestedStop, apiErrorMessage || "Unknown API error")), { headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } })
       }
       const nowSeconds = Math.floor(Date.now() / 1000)
       let vehicleResponse: AnyRecord | undefined
@@ -188,7 +189,8 @@ export default {
       return new Response(JSON.stringify(result), { headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } })
     } catch (error) {
       console.error(error)
-      return new Response(`Unable to load PRT API: ${error instanceof Error ? error.message : "unknown error"}`, { status: 502, headers: corsHeaders })
+      const requestedStop = new URL(request.url).searchParams.get("stop") ?? DEFAULT_STOP_ID
+      return new Response(JSON.stringify(staticFallback(requestedStop, error instanceof Error ? error.message : "unknown error")), { headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8" } })
     }
   },
 }
