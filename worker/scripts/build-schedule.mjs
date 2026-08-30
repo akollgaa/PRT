@@ -15,22 +15,22 @@ const trips = rows("trips.txt")
 const matchingTrips = new Map(trips.filter((trip) => routes.has(trip.route_id)).map((trip) => [trip.trip_id, trip]))
 const stopTimes = rows("stop_times.txt").filter((row) => matchingTrips.has(row.trip_id))
 const selectedTripIds = new Set(stopTimes.map((row) => row.trip_id))
+const tripsByStop = {}
+
+for (const stop of stopTimes) {
+  const trip = matchingTrips.get(stop.trip_id)
+  const stopTrips = tripsByStop[stop.stop_id] ??= []
+  stopTrips.push({
+    tripId: stop.trip_id,
+    routeId: trip.route_id,
+    serviceId: trip.service_id,
+    time: stop.arrival_time || stop.departure_time,
+  })
+}
 
 const schedule = {
   generatedAt: new Date().toISOString(),
-  trips: stopTimes.map((stop) => {
-    const trip = matchingTrips.get(stop.trip_id)
-    return {
-      tripId: stop.trip_id,
-      stopId: stop.stop_id,
-      routeId: trip.route_id,
-      headsign: trip.trip_headsign ?? "",
-      directionId: trip.direction_id ?? "",
-      serviceId: trip.service_id,
-      arrivalTime: stop.arrival_time,
-      departureTime: stop.departure_time,
-    }
-  }),
+  tripsByStop,
   calendar: rows("calendar.txt"),
   calendarDates: rows("calendar_dates.txt").filter((row) => matchingTripsHasService(matchingTrips, selectedTripIds, row.service_id)),
 }
@@ -42,4 +42,4 @@ function matchingTripsHasService(tripMap, tripIds, serviceId) {
 
 await mkdir("src/data", { recursive: true })
 await writeFile("src/data/schedule.json", JSON.stringify(schedule))
-console.log(`Wrote ${schedule.trips.length} stop trips to src/data/schedule.json`)
+console.log(`Wrote ${stopTimes.length} stop trips across ${Object.keys(tripsByStop).length} stops to src/data/schedule.json`)

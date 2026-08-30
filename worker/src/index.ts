@@ -2,7 +2,8 @@ import schedule from "./data/schedule.json"
 
 interface Env { PRT_API_BASE_URL?: string; PRT_API_KEY?: string; PRT_RTPI_DATA_FEED?: string }
 type AnyRecord = Record<string, any>
-type ScheduleData = { trips: AnyRecord[]; calendar: AnyRecord[]; calendarDates: AnyRecord[] }
+type ScheduleTrip = { tripId: string; routeId: string; serviceId: string; time: string }
+type ScheduleData = { tripsByStop: Record<string, ScheduleTrip[]>; calendar: AnyRecord[]; calendarDates: AnyRecord[] }
 const scheduleData = schedule as unknown as ScheduleData
 const ROUTES = new Set(["61A", "61B", "61C", "61D"])
 const DEFAULT_STOP_ID = "7097"
@@ -61,9 +62,9 @@ function serviceDateEpoch(date: Date, time: string) {
 function scheduledArrivals(nowSeconds: number, stopId: string) {
   const now = new Date(nowSeconds * 1000)
   const active = activeServices(now)
-  return scheduleData.trips.flatMap((trip) => {
-    if (!active.has(trip.serviceId) || trip.stopId !== stopId) return []
-    const seconds = serviceDateEpoch(now, trip.arrivalTime ?? trip.departureTime)
+  return (scheduleData.tripsByStop[stopId] ?? []).flatMap((trip) => {
+    if (!active.has(trip.serviceId)) return []
+    const seconds = serviceDateEpoch(now, trip.time)
     if (seconds < nowSeconds || seconds > nowSeconds + WINDOW_SECONDS) return []
     return [{ routeId: trip.routeId, tripId: trip.tripId, scheduledTime: timeLabel(seconds), scheduledTimestamp: new Date(seconds * 1000).toISOString(), scheduledEpoch: seconds, realtime: false }]
   })

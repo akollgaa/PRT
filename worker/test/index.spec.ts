@@ -1,29 +1,16 @@
-import {
-	env,
-	createExecutionContext,
-	waitOnExecutionContext,
-	SELF,
-} from "cloudflare:test";
 import { describe, it, expect } from "vitest";
-import worker from "../src/index";
+import { normalize } from "../src/index";
 
-// For now, you'll need to do something like this to get a correctly-typed
-// `Request` to pass to `worker.fetch()`.
-const IncomingRequest = Request<unknown, IncomingRequestCfProperties>;
+const sundayMorning = Date.parse("2026-08-30T13:30:00Z") / 1000;
 
-describe("Hello World worker", () => {
-	it("responds with Hello World! (unit style)", async () => {
-		const request = new IncomingRequest("http://example.com");
-		// Create an empty context to pass to `worker.fetch()`.
-		const ctx = createExecutionContext();
-		const response = await worker.fetch(request, env, ctx);
-		// Wait for all `Promise`s passed to `ctx.waitUntil()` to settle before running test assertions
-		await waitOnExecutionContext(ctx);
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+describe("arrival Worker", () => {
+	it("keeps a scheduled trip when its stop has no realtime prediction", () => {
+		const result = normalize({ "bustime-response": { prd: [] } }, undefined, sundayMorning, "7097");
+		expect(result.arrivals.some((arrival) => arrival.realtime === false)).toBe(true);
 	});
 
-	it("responds with Hello World! (integration style)", async () => {
-		const response = await SELF.fetch("https://example.com");
-		expect(await response.text()).toMatchInlineSnapshot(`"Hello World!"`);
+	it("does not return trips from another stop", () => {
+		const result = normalize({ "bustime-response": { prd: [] } }, undefined, sundayMorning, "not-a-prt-stop");
+		expect(result.arrivals).toEqual([]);
 	});
 });
